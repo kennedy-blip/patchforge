@@ -1,0 +1,70 @@
+name: APK patch worker
+on:
+  workflow_dispatch:
+    inputs:
+      build_id: {required: true, type: string}
+      apk_download_url: {required: true, type: string}
+      recipe_json_base64: {required: true, type: string}
+      callback_url: {required: true, type: string}
+permissions: {contents: read}
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BUILD_ID: ${{ inputs.build_id }}
+      SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: '17'}
+      - name: Validate and fetch input
+        env:
+          URL: ${{ inputs.apk_download_url }}
+          RECIPE: ${{ inputs.recipe_json_base64 }}
+        run: |
+          [[ "$BUILD_ID" =~ ^[a-f0-9-]{36}$ && "$URL" == "$SUPABASE_URL/storage/v1/object/sign/raw-apks/"* ]]
+          curl --fail --proto '=https' --max-filesize 104857600 "$URL" -o input.apk
+          echo "$RECIPE" | base64 -d > recipe.json
+          python3 - <<'PY'
+          import zipfile,pathlib
+          with zipfile.ZipFile('input.apk') as z:
+              assert open('input.apk','rb').read(4)==b'PK\x03\x04' and 'AndroidManifest.xml' in z.namelist()
+              assert sum(x.file_size for x in z.infolist())<500_000_000 and len(z.infolist())<40000
+              assert all(not pathlib.PurePosixPath(n).is_absolute() and '..' not in pathlib.PurePosixPath(n).parts for n in z.namelist())
+          PY
+      - name: Decode and apply recipe
+        run: |
+          curl -fsSL https://github.com/iBotPeaches/Apktool/releases/download/v2.12.1/apktool_2.12.1.jar -o apktool.jar
+          echo "66cf4524a4a45a7f56567d08b2c9b6ec237bcdd78cee69fd4a59c8a0243aeafa  apktool.jar" | sha256sum -c -
+          java -jar apktool.jar d -s input.apk -o decoded
+          python3 scripts/apply_patch_recipe.py decoded recipe.json
+          java -jar apktool.jar b decoded -o unsigned.apk
+      - name: Align and sign
+        run: |
+          tools=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          "$tools/zipalign" -f 4 unsigned.apk aligned.apk
+          keytool -genkeypair -keystore debug.jks -storepass android -keypass android -alias patchforge -keyalg RSA -dname CN=PatchForge -validity 365
+          "$tools/apksigner" sign --ks debug.jks --ks-pass pass:android --out patched.apk aligned.apk
+          "$tools/apksigner" verify patched.apk
+      - name: Store artifact
+        env:
+          KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: curl -fsS -X POST -H "Authorization:Bearer $KEY" -H "apikey:$KEY" -H 'Content-Type:application/vnd.android.package-archive' --data-binary @patched.apk "$SUPABASE_URL/storage/v1/object/patched-apks/$BUILD_ID.apk"
+      - name: Notify studio
+        if: always()
+        env:
+          SECRET: ${{ secrets.WEBHOOK_SECRET }}
+          CALLBACK: ${{ inputs.callback_url }}
+          STUDIO: ${{ vars.STUDIO_URL }}
+          RESULT: ${{ job.status }}
+        run: |
+          [[ "$CALLBACK" == "$STUDIO/api/webhooks/build-complete" ]]
+          python3 - <<'PY'
+          import hashlib,hmac,os,json,urllib.request,pathlib
+          e=os.environ; p=pathlib.Path('patched.apk'); ok=e['RESULT']=='success'
+          data=json.dumps(dict(id=e['BUILD_ID'],status='Ready' if ok else 'Failed',sha256=hashlib.sha256(p.read_bytes()).hexdigest() if ok else None,bytes=p.stat().st_size if ok else None)).encode()
+          sig=hmac.new(e['SECRET'].encode(),data,'sha256').hexdigest()
+          urllib.request.urlopen(urllib.request.Request(e['CALLBACK'],data,{'Content-Type':'application/json','X-Signature':sig}),timeout=20).read()
+          PY
