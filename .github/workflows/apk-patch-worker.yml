@@ -15,9 +15,9 @@ jobs:
       BUILD_ID: ${{ inputs.build_id }}
       SUPABASE_URL: ${{ vars.SUPABASE_URL }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: {persist-credentials: false}
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with: {distribution: temurin, java-version: '17'}
       - name: Validate and fetch input
         env:
