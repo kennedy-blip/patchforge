@@ -45,7 +45,7 @@ jobs:
           if ! gradle -p android --no-daemon --console=plain --stacktrace :app:assembleRelease >"$log" 2>&1; then
             cat "$log"
             details="$(awk '/\* What went wrong:/{capture=1} capture && count++ < 6 {print}' "$log" | tr '\n' ' ' | cut -c1-700)"
-            cause="$(grep -n -B 1 -A 2 -E 'Caused by:|Value is null|NullPointerException|IllegalArgumentException' "$log" | tail -n 8 | tr '\n' ' ' | cut -c1-700)"
+            cause="$(awk '/Caused by: java.lang.IllegalArgumentException: Value is null/{capture=1; count=0} capture {print; if (++count == 20) exit}' "$log" | tr '\n' ' ' | cut -c1-700)"
             details="$details $cause"
             [[ -n "$details" ]] || details="$(tail -n 8 "$log" | tr '\n' ' ' | cut -c1-1000)"
             echo "::error::Android APK assembly failed: $details"
