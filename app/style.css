@@ -142,6 +142,13 @@ header {
   padding: 0 10px;
   font-size: 12px;
 }
+a.download {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text);
+  text-decoration: none;
+}
 .avatar {
   border-radius: 50%;
   background: #29352e;

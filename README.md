@@ -23,7 +23,7 @@ python3 -m unittest discover -s scripts
 
 ## Android companion release
 
-Generate a dedicated release keystore offline. Put its base64 encoding in the Actions secret `STUDIO_KEYSTORE_BASE64` and its password in `STUDIO_KEYSTORE_PASSWORD` (same store/key password). Keep a secure offline backup. Set `STUDIO_URL` as above. Run **Publish Studio Android wrapper**. It packages that HTTPS origin in a WebView, signs the release, and publishes `PatchForge-Studio.apk`. Set `NEXT_PUBLIC_STUDIO_APK_URL=https://github.com/OWNER/REPO/releases/latest/download/PatchForge-Studio.apk` on Vercel and redeploy. Until configured, the header opens release information instead.
+Generate a dedicated release keystore offline. Put its base64 encoding in the Actions secret `STUDIO_KEYSTORE_BASE64` and its password in `STUDIO_KEYSTORE_PASSWORD` (same store/key password). Keep a secure offline backup. Set `STUDIO_URL` to the deployed HTTPS origin, then run **Publish Studio Android wrapper**. The workflow assembles the Android wrapper, aligns and signs it, verifies the signature, and publishes `PatchForge-Studio.apk`. The header's **Download App** button downloads the latest release APK directly; it defaults to `https://github.com/kennedy-blip/patchforge/releases/latest/download/PatchForge-Studio.apk`. Set `NEXT_PUBLIC_STUDIO_APK_URL` only if you want to override that location. A release asset is available after the signing key and `STUDIO_URL` are configured and the publish workflow succeeds. The pull-request verification workflow also compiles an unsigned release APK to catch Android/Gradle errors without needing the production signing key.
 
 ## Current scope
 

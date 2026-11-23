@@ -4,3 +4,6 @@ node_modules
 !.env.example
 __pycache__
 *.tsbuildinfo
+.gradle/
+**/build/
+local.properties

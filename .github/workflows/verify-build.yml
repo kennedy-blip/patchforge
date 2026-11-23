@@ -1,0 +1,68 @@
+name: Verify web and Android builds
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install web dependencies
+        run: npm ci
+      - name: Check production dependencies
+        run: npm audit --omit=dev
+      - name: Build web app
+        run: npm run build
+      - name: Test APK patch recipe
+        run: python3 -m unittest discover -s scripts -v
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+      - name: Install Android 35 build packages
+        run: sdkmanager --install 'platforms;android-35' 'build-tools;35.0.0'
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '8.10.2'
+          cache-provider: basic
+      - name: Assemble unsigned Android release APK
+        env:
+          STUDIO_URL: https://patchforge.invalid
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/gradle-build.log"
+          if ! gradle -p android --no-daemon --console=plain --stacktrace :app:assembleRelease >"$log" 2>&1; then
+            cat "$log"
+            details="$(awk '/\* What went wrong:/{capture=1} capture && count++ < 6 {print}' "$log" | tr '\n' ' ' | cut -c1-450)"
+            cause="$(awk '/Caused by: java.lang.IllegalArgumentException: Value is null/{capture=1; count=0} capture {print; if (++count == 30) exit}' "$log" | tr '\n' ' ' | cut -c1-1500)"
+            details="$details $cause"
+            [[ -n "$details" ]] || details="$(tail -n 8 "$log" | tr '\n' ' ' | cut -c1-1000)"
+            echo "::error::Android APK assembly failed: $details"
+            exit 1
+          fi
+          cat "$log"
+      - name: Verify APK archive
+        run: |
+          apk="$(find android/app/build/outputs/apk/release -maxdepth 1 -type f -name '*unsigned.apk' -print -quit)"
+          [[ -n "$apk" && -s "$apk" ]] || { echo 'Gradle did not create an unsigned APK.'; exit 1; }
+          python3 - "$apk" <<'PY'
+          import sys, zipfile
+          path = sys.argv[1]
+          with zipfile.ZipFile(path) as archive:
+              assert archive.testzip() is None, 'APK ZIP integrity check failed'
+              names = set(archive.namelist())
+              assert 'AndroidManifest.xml' in names, 'APK manifest is missing'
+              assert 'classes.dex' in names, 'APK bytecode is missing'
+          print(f'APK archive is valid: {path}')
+          PY

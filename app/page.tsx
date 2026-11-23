@@ -37,6 +37,9 @@ import {
 } from "lucide-react";
 const samples = ["Simple Calculator", "Simple Notes"];
 const files = ["simple-calculator.apk", "simple-notes.apk"];
+const studioApkUrl =
+  (process.env.NEXT_PUBLIC_STUDIO_APK_URL || "").trim() ||
+  "https://github.com/kennedy-blip/patchforge/releases/latest/download/PatchForge-Studio.apk";
 const tabs = ["Identity", "Manifest", "Resources", "Recipe"];
 const stages = [
   "Queued",
@@ -269,16 +272,14 @@ export default function Home() {
           <Monitor size={16} />
           <ChevronDown size={12} />
         </button>
-        <button
+        <a
           className="download"
-          onClick={() =>
-            process.env.NEXT_PUBLIC_STUDIO_APK_URL
-              ? window.location.assign(process.env.NEXT_PUBLIC_STUDIO_APK_URL)
-              : M("Download app")
-          }
+          href={studioApkUrl}
+          aria-label="Download PatchForge Studio for Android"
+          title="Download the latest PatchForge Studio APK"
         >
           <Download size={15} /> Download App <small>.apk</small>
-        </button>
+        </a>
         <button className="avatar" onClick={() => M("Guest session")}>
           G
         </button>
@@ -695,17 +696,7 @@ export default function Home() {
                   You are using the local demo workspace. Recipes and sample
                   builds do not require an account.
                 </p>
-              ) : (
-                <>
-                  <p>
-                    Install the companion Android app from the published Studio
-                    release.
-                  </p>
-                  <a href="https://github.com/kennedy-blip/patchforge/releases/latest">
-                    View latest release ↗
-                  </a>
-                </>
-              )}
+              ) : null}
             </div>
           </div>
         </div>
