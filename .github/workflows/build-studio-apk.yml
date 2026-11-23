@@ -33,7 +33,7 @@ jobs:
           [[ -n "$KEYSTORE" ]] || { echo '::error::Set Actions secret STUDIO_KEYSTORE_BASE64 to the dedicated release keystore.'; exit 1; }
           [[ -n "$PASSWORD" ]] || { echo '::error::Set Actions secret STUDIO_KEYSTORE_PASSWORD.'; exit 1; }
       - name: Build release APK
-        run: gradle -p android --no-daemon --console=plain assembleRelease
+        run: gradle -p android --no-daemon --console=plain :app:assembleRelease
       - name: Align, sign and verify APK
         env:
           KEYSTORE: ${{ secrets.STUDIO_KEYSTORE_BASE64 }}
@@ -42,7 +42,7 @@ jobs:
           set -euo pipefail
           printf '%s' "$KEYSTORE" | base64 --decode > "$RUNNER_TEMP/studio.jks"
           test -s "$RUNNER_TEMP/studio.jks"
-          apk="$(find android/build/outputs/apk/release -maxdepth 1 -type f -name '*unsigned.apk' -print -quit)"
+          apk="$(find android/app/build/outputs/apk/release -maxdepth 1 -type f -name '*unsigned.apk' -print -quit)"
           [[ -n "$apk" ]] || { echo '::error::Gradle did not produce an unsigned release APK.'; exit 1; }
           tools="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
           [[ -x "$tools/zipalign" && -x "$tools/apksigner" ]] || { echo '::error::Android build tools are missing.'; exit 1; }

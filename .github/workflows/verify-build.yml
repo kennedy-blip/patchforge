@@ -42,7 +42,7 @@ jobs:
         run: |
           set -euo pipefail
           log="$RUNNER_TEMP/gradle-build.log"
-          if ! gradle -p android --no-daemon --console=plain --stacktrace assembleRelease >"$log" 2>&1; then
+          if ! gradle -p android --no-daemon --console=plain --stacktrace :app:assembleRelease >"$log" 2>&1; then
             cat "$log"
             details="$(awk '/\* What went wrong:/{capture=1} capture && count++ < 6 {print}' "$log" | tr '\n' ' ' | cut -c1-700)"
             cause="$(grep -n -B 1 -A 2 -E 'Caused by:|Value is null|NullPointerException|IllegalArgumentException' "$log" | tail -n 8 | tr '\n' ' ' | cut -c1-700)"
@@ -54,7 +54,7 @@ jobs:
           cat "$log"
       - name: Verify APK archive
         run: |
-          apk="$(find android/build/outputs/apk/release -maxdepth 1 -type f -name '*unsigned.apk' -print -quit)"
+          apk="$(find android/app/build/outputs/apk/release -maxdepth 1 -type f -name '*unsigned.apk' -print -quit)"
           [[ -n "$apk" && -s "$apk" ]] || { echo 'Gradle did not create an unsigned APK.'; exit 1; }
           python3 - "$apk" <<'PY'
           import sys, zipfile
