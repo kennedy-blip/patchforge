@@ -1,6 +1,4 @@
-plugins {
-    id 'com.android.application'
-}
+apply plugin: 'com.android.application'
 
 def studioUrl = System.getenv('STUDIO_URL') ?: ''
 if (!(studioUrl ==~ /https:\/\/[A-Za-z0-9.-]+\/?/)) {
