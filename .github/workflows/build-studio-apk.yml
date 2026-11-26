@@ -1,13 +1,19 @@
 name: Publish Studio Android wrapper
 on:
   workflow_dispatch:
+    inputs:
+      studio_url:
+        description: "Public HTTPS URL of the deployed PatchForge Studio"
+        required: true
+        type: string
 permissions:
   contents: write
 jobs:
   wrapper:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
-      STUDIO_URL: ${{ vars.STUDIO_URL }}
+      STUDIO_URL: ${{ inputs.studio_url }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -23,33 +29,46 @@ jobs:
         with:
           gradle-version: '8.10.2'
           cache-provider: basic
-      - name: Validate release configuration
-        env:
-          KEYSTORE: ${{ secrets.STUDIO_KEYSTORE_BASE64 }}
-          PASSWORD: ${{ secrets.STUDIO_KEYSTORE_PASSWORD }}
+      - name: Validate app URL
         run: |
           set -euo pipefail
-          [[ "$STUDIO_URL" =~ ^https://[A-Za-z0-9.-]+/?$ ]] || { echo '::error::Set repository variable STUDIO_URL to the deployed HTTPS origin.'; exit 1; }
-          [[ -n "$KEYSTORE" ]] || { echo '::error::Set Actions secret STUDIO_KEYSTORE_BASE64 to the dedicated release keystore.'; exit 1; }
-          [[ -n "$PASSWORD" ]] || { echo '::error::Set Actions secret STUDIO_KEYSTORE_PASSWORD.'; exit 1; }
+          [[ "$STUDIO_URL" =~ ^https://[A-Za-z0-9.-]+/?$ ]] || { echo '::error::Enter the deployed Studio HTTPS origin, without a path.'; exit 1; }
       - name: Build release APK
         run: gradle -p android --no-daemon --console=plain :app:assembleRelease
-      - name: Align, sign and verify APK
+      - name: Sign APK (release key or temporary test key)
         env:
           KEYSTORE: ${{ secrets.STUDIO_KEYSTORE_BASE64 }}
           PASSWORD: ${{ secrets.STUDIO_KEYSTORE_PASSWORD }}
         run: |
           set -euo pipefail
-          printf '%s' "$KEYSTORE" | base64 --decode > "$RUNNER_TEMP/studio.jks"
-          test -s "$RUNNER_TEMP/studio.jks"
-          apk="$(find android/app/build/outputs/apk/release -maxdepth 1 -type f -name '*unsigned.apk' -print -quit)"
-          [[ -n "$apk" ]] || { echo '::error::Gradle did not produce an unsigned release APK.'; exit 1; }
           tools="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
-          [[ -x "$tools/zipalign" && -x "$tools/apksigner" ]] || { echo '::error::Android build tools are missing.'; exit 1; }
+          apk="$(find android/app/build/outputs/apk/release -maxdepth 1 -type f -name '*unsigned.apk' -print -quit)"
+          [[ -n "$apk" && -s "$apk" ]] || { echo '::error::Gradle did not produce an unsigned release APK.'; exit 1; }
+          if [[ -n "$KEYSTORE" && -n "$PASSWORD" ]]; then
+            printf '%s' "$KEYSTORE" | base64 --decode > "$RUNNER_TEMP/studio.jks"
+            signing_password="$PASSWORD"
+            echo "SIGNING_MODE=release" >> "$GITHUB_ENV"
+          else
+            echo '::warning::Release keystore secrets are not configured; creating a temporary test signing key. This APK is for testing only and cannot update a future production-signed install.'
+            signing_password="$(openssl rand -hex 24)"
+            keytool -genkeypair -noprompt -keystore "$RUNNER_TEMP/studio.jks" -storepass "$signing_password" -keypass "$signing_password" -alias patchforge-test -keyalg RSA -keysize 2048 -validity 30 -dname "CN=PatchForge Test,O=PatchForge,C=KE"
+            echo "SIGNING_MODE=test" >> "$GITHUB_ENV"
+          fi
           "$tools/zipalign" -f 4 "$apk" "$RUNNER_TEMP/studio-aligned.apk"
-          "$tools/apksigner" sign --ks "$RUNNER_TEMP/studio.jks" --ks-pass env:PASSWORD --out PatchForge-Studio.apk "$RUNNER_TEMP/studio-aligned.apk"
+          "$tools/apksigner" sign --ks "$RUNNER_TEMP/studio.jks" --ks-pass "pass:$signing_password" --key-pass "pass:$signing_password" --out PatchForge-Studio.apk "$RUNNER_TEMP/studio-aligned.apk"
           "$tools/apksigner" verify --verbose PatchForge-Studio.apk
-      - name: Publish GitHub release
+          sha256sum PatchForge-Studio.apk | tee PatchForge-Studio.apk.sha256
+      - name: Upload installable APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PatchForge-Studio-${{ github.run_number }}-${{ env.SIGNING_MODE }}
+          path: |
+            PatchForge-Studio.apk
+            PatchForge-Studio.apk.sha256
+          if-no-files-found: error
+          retention-days: 14
+      - name: Publish GitHub release when production signing is configured
+        if: env.SIGNING_MODE == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "studio-$GITHUB_RUN_NUMBER" PatchForge-Studio.apk --latest --title "PatchForge Studio $GITHUB_RUN_NUMBER" --notes 'Signed Android companion app.'
+        run: gh release create "studio-$GITHUB_RUN_NUMBER" PatchForge-Studio.apk --latest --title "PatchForge Studio $GITHUB_RUN_NUMBER" --notes 'Production-signed Android companion app.'
